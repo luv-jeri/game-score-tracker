@@ -441,6 +441,11 @@ interface FileSystemAccessWindow extends Window {
   }) => Promise<FileSystemFileHandle[]>
 }
 
+interface FileSystemFileHandleWithPermissions extends FileSystemFileHandle {
+  queryPermission?: (options: { mode: 'read' | 'readwrite' }) => Promise<'granted' | 'denied' | 'prompt'>
+  requestPermission?: (options: { mode: 'read' | 'readwrite' }) => Promise<'granted' | 'denied' | 'prompt'>
+}
+
 // Helper function to request file access
 const requestFileAccess = async (): Promise<FileSystemFileHandle | null> => {
   try {
@@ -482,9 +487,9 @@ const saveToFile = async (data: GameState): Promise<boolean> => {
     }
 
     // Check if we still have permission
-    const permission = await fileHandle.queryPermission({ mode: 'readwrite' })
+    const permission = await (fileHandle as FileSystemFileHandleWithPermissions).queryPermission?.({ mode: 'readwrite' })
     if (permission !== 'granted') {
-      const requestPermission = await fileHandle.requestPermission({ mode: 'readwrite' })
+      const requestPermission = await (fileHandle as FileSystemFileHandleWithPermissions).requestPermission?.({ mode: 'readwrite' })
       if (requestPermission !== 'granted') {
         console.warn('File permission denied')
         fileHandle = null
@@ -560,146 +565,9 @@ const exportGameData = (data: GameState): void => {
 }
 
 
-// Helper function to split data into chunks
-const splitIntoChunks = (data: string, chunkSize: number = 50000): string[] => {
-  const chunks: string[] = []
-  for (let i = 0; i < data.length; i += chunkSize) {
-    chunks.push(data.slice(i, i + chunkSize))
-  }
-  return chunks
-}
 
-// Helper function to save data in chunks
-const saveChunkedData = (baseKey: string, data: string): boolean => {
-  try {
-    // First, clean up any existing chunks for this key
-    cleanupChunks(baseKey)
 
-    // Split data into chunks
-    const chunks = splitIntoChunks(data)
 
-    // If data is small enough, save as single chunk
-    if (chunks.length === 1) {
-      localStorage.setItem(baseKey, data)
-      return true
-    }
-
-    // Save metadata about the chunks
-    const metadata = {
-      totalChunks: chunks.length,
-      timestamp: Date.now(),
-      dataSize: data.length,
-      version: '2.0' // Version for compatibility
-    }
-
-    // Save metadata
-    localStorage.setItem(`${baseKey}-meta`, JSON.stringify(metadata))
-
-    // Save each chunk
-    for (let i = 0; i < chunks.length; i++) {
-      const chunkKey = `${baseKey}-chunk-${i}`
-      localStorage.setItem(chunkKey, chunks[i])
-    }
-
-    return true
-  } catch (error) {
-    console.error('Failed to save chunked data:', error)
-    return false
-  }
-}
-
-// Helper function to load data from chunks
-const loadChunkedData = (baseKey: string): string | null => {
-  try {
-    // First try to load as single item (for small data)
-    const singleData = localStorage.getItem(baseKey)
-    if (singleData) {
-      return singleData
-    }
-
-    // Load metadata
-    const metadataStr = localStorage.getItem(`${baseKey}-meta`)
-    if (!metadataStr) {
-      return null
-    }
-
-    const metadata = JSON.parse(metadataStr)
-    const { totalChunks } = metadata
-
-    // Load all chunks
-    const chunks: string[] = []
-    for (let i = 0; i < totalChunks; i++) {
-      const chunkKey = `${baseKey}-chunk-${i}`
-      const chunk = localStorage.getItem(chunkKey)
-      if (!chunk) {
-        console.error(`Missing chunk ${i} for key ${baseKey}`)
-        return null
-      }
-      chunks.push(chunk)
-    }
-
-    // Combine chunks
-    return chunks.join('')
-  } catch (error) {
-    console.error('Failed to load chunked data:', error)
-    return null
-  }
-}
-
-// Helper function to cleanup old chunks
-const cleanupChunks = (baseKey: string): void => {
-  try {
-    // Remove metadata
-    localStorage.removeItem(`${baseKey}-meta`)
-
-    // Remove all chunks (we don't know how many there might be, so we'll try up to 100)
-    for (let i = 0; i < 100; i++) {
-      const chunkKey = `${baseKey}-chunk-${i}`
-      if (localStorage.getItem(chunkKey)) {
-        localStorage.removeItem(chunkKey)
-      } else {
-        // If we hit a missing chunk, we've probably cleaned them all
-        break
-      }
-    }
-
-    // Also clean up old format chunks for backward compatibility
-    for (let i = 0; i < 100; i++) {
-      const oldChunkKey = `${baseKey}-${i}`
-      if (localStorage.getItem(oldChunkKey)) {
-        localStorage.removeItem(oldChunkKey)
-      } else {
-        break
-      }
-    }
-  } catch (error) {
-    console.error('Failed to cleanup chunks:', error)
-  }
-}
-
-// Helper function to check localStorage size (no limits applied)
-const checkAndCleanStorage = (): boolean => {
-  try {
-    // Log localStorage usage for monitoring only, no cleanup
-    let totalSize = 0
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i)
-      if (key) {
-        const value = localStorage.getItem(key)
-        if (value) {
-          totalSize += key.length + value.length
-        }
-      }
-    }
-
-    // Just log the size, don't enforce any limits
-    console.log(`LocalStorage size: ${Math.round(totalSize / 1024)}KB`)
-    return false
-  } catch (error) {
-    console.warn('Error checking localStorage size:', error)
-    return false
-  }
-}
 
 
 
@@ -715,10 +583,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     const loadGame = async () => {
       try {
         // Try to load from localStorage first (for backward compatibility)
-        let savedGame = loadChunkedData('game-score-tracker')
-        if (!savedGame) {
-          savedGame = localStorage.getItem('game-score-tracker')
-        }
+        const savedGame = localStorage.getItem('game-score-tracker')
 
         if (savedGame) {
           try {
@@ -727,11 +592,9 @@ export function GameProvider({ children }: { children: ReactNode }) {
             console.log('Game loaded from localStorage')
 
             // Clean up localStorage after loading since we'll use file storage going forward
-            cleanupChunks('game-score-tracker')
             localStorage.removeItem('game-score-tracker')
           } catch (error) {
             console.error('Failed to load saved game:', error)
-            cleanupChunks('game-score-tracker')
             localStorage.removeItem('game-score-tracker')
           }
         }
@@ -792,7 +655,6 @@ export function GameProvider({ children }: { children: ReactNode }) {
     fileHandle = null
     setIsFirstSave(true)
     // Clean up any remaining localStorage
-    cleanupChunks('game-score-tracker')
     localStorage.removeItem('game-score-tracker')
   }
 
