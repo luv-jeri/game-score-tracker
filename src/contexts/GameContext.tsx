@@ -423,6 +423,24 @@ const GameContext = createContext<GameContextType | undefined>(undefined)
 // File System Access API for saving to text file
 let fileHandle: FileSystemFileHandle | null = null
 
+// Type definitions for File System Access API
+interface FileSystemAccessWindow extends Window {
+  showSaveFilePicker?: (options?: {
+    suggestedName?: string
+    types?: Array<{
+      description: string
+      accept: Record<string, string[]>
+    }>
+  }) => Promise<FileSystemFileHandle>
+  showOpenFilePicker?: (options?: {
+    types?: Array<{
+      description: string
+      accept: Record<string, string[]>
+    }>
+    multiple?: boolean
+  }) => Promise<FileSystemFileHandle[]>
+}
+
 // Helper function to request file access
 const requestFileAccess = async (): Promise<FileSystemFileHandle | null> => {
   try {
@@ -432,7 +450,7 @@ const requestFileAccess = async (): Promise<FileSystemFileHandle | null> => {
       return null
     }
 
-    const handle = await (window as any).showSaveFilePicker({
+    const handle = await (window as FileSystemAccessWindow).showSaveFilePicker!({
       suggestedName: 'game-score-tracker-data.json',
       types: [
         {
@@ -464,9 +482,9 @@ const saveToFile = async (data: GameState): Promise<boolean> => {
     }
 
     // Check if we still have permission
-    const permission = await (fileHandle as any).queryPermission({ mode: 'readwrite' })
+    const permission = await fileHandle.queryPermission({ mode: 'readwrite' })
     if (permission !== 'granted') {
-      const requestPermission = await (fileHandle as any).requestPermission({ mode: 'readwrite' })
+      const requestPermission = await fileHandle.requestPermission({ mode: 'readwrite' })
       if (requestPermission !== 'granted') {
         console.warn('File permission denied')
         fileHandle = null
@@ -498,7 +516,7 @@ const loadFromFile = async (): Promise<GameState | null> => {
       return null
     }
 
-    const [handle] = await (window as any).showOpenFilePicker({
+    const [handle] = await (window as FileSystemAccessWindow).showOpenFilePicker!({
       types: [
         {
           description: 'Game Data File',
@@ -541,11 +559,6 @@ const exportGameData = (data: GameState): void => {
   console.log('Game data exported successfully')
 }
 
-// Helper function to save full game state for localStorage
-const compressGameState = (state: GameState): string => {
-  // Save complete state without any compression or limits
-  return JSON.stringify(state)
-}
 
 // Helper function to split data into chunks
 const splitIntoChunks = (data: string, chunkSize: number = 50000): string[] => {
@@ -688,37 +701,7 @@ const checkAndCleanStorage = (): boolean => {
   }
 }
 
-// Helper function to perform periodic cleanup (disabled for unlimited storage)
-const performPeriodicCleanup = (): void => {
-  // No cleanup performed - unlimited storage enabled
-}
 
-// Helper function to safely save to localStorage with error handling using chunked storage
-const saveToLocalStorage = (key: string, data: string): boolean => {
-  // Log storage size for monitoring
-  checkAndCleanStorage()
-
-  // Try chunked storage first (handles large data automatically)
-  const chunkedSuccess = saveChunkedData(key, data)
-  if (chunkedSuccess) {
-    return true
-  }
-
-  // Fallback to regular storage if chunked fails
-  try {
-    localStorage.setItem(key, data)
-    return true
-  } catch (error) {
-    if (error instanceof Error && error.name === 'QuotaExceededError') {
-      console.error('LocalStorage quota exceeded. Unable to save game state.')
-      console.log('Consider: 1) Using a different browser with larger quota, 2) Clearing old browser data, or 3) Exporting your game data manually.')
-      return false
-    } else {
-      console.error('Failed to save game state:', error)
-      return false
-    }
-  }
-}
 
 export function GameProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(gameReducer, initialState)
