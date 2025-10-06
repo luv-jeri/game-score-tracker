@@ -84,7 +84,7 @@ export default function UserScoreModal({ player, isOpen, onClose }: UserScoreMod
         <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-6">
           <div className="flex items-center justify-between">
             <h2 className="text-3xl font-bold">
-              📊 {player.name}'s Score History
+              📊 {player.name}&apos;s Score History
             </h2>
             <button
               onClick={onClose}

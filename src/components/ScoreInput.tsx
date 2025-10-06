@@ -5,11 +5,12 @@ import { useGame } from '@/contexts/GameContext'
 
 export default function ScoreInput() {
   const { state, addScore, completeTurn, nextTurn } = useGame()
-  const { players, currentPlayerIndex, gameEnded } = state
+  const { players, teams, currentPlayerIndex, gameEnded, gameMode } = state
   const [scores, setScores] = useState<[string, string, string]>(['', '', ''])
   const inputRefs = useRef<(HTMLInputElement | null)[]>([])
 
   const currentPlayer = players[currentPlayerIndex]
+  const currentTeam = currentPlayer?.teamId ? teams.find(t => t.id === currentPlayer.teamId) : null
 
   // Focus first input field when current player changes
   useEffect(() => {
@@ -137,6 +138,10 @@ export default function ScoreInput() {
   const excessAmount = wouldExceedTarget ? (currentPlayer.score + currentTurnTotal) - state.targetScore : 0
   const remainingPoints = currentPlayer ? state.targetScore - currentPlayer.score : 0
 
+  // Calculate team score and remaining points for team mode
+  const teamScore = currentTeam ? currentTeam.score : 0
+  const teamRemainingPoints = currentTeam ? state.targetScore - teamScore : 0
+
   return (
     <div className="max-w-2xl mx-auto bg-white rounded-xl shadow-xl p-8">
       <h3 className="text-3xl font-bold text-gray-800 mb-6 text-center">
@@ -150,8 +155,22 @@ export default function ScoreInput() {
         <p className="text-4xl font-bold text-blue-600 mb-2">
           {currentPlayer?.name}
         </p>
+
+        {/* Team Information */}
+        {gameMode === 'team' && currentTeam && (
+          <div className="mb-4 p-4 bg-purple-50 border-2 border-purple-200 rounded-xl">
+            <p className="text-lg text-purple-700 font-semibold mb-2">
+              Team: {currentTeam.name}
+            </p>
+            <div className="flex justify-center space-x-6 text-sm text-purple-600">
+              <span>Team Total: <span className="font-semibold text-purple-700">{teamScore}</span></span>
+              <span>Team Remaining: <span className="font-semibold text-green-600">{teamRemainingPoints}</span></span>
+            </div>
+          </div>
+        )}
+
         <div className="flex justify-center space-x-6 text-lg text-gray-500">
-          <span>Total: <span className="font-semibold text-gray-700">{currentPlayer?.score || 0}</span></span>
+          <span>Individual Total: <span className="font-semibold text-gray-700">{currentPlayer?.score || 0}</span></span>
           <span>Turn: <span className="font-semibold text-gray-700">{currentPlayer?.turns.length ? currentPlayer.turns.length + 1 : 1}</span></span>
           <span>Remaining: <span className="font-semibold text-green-600">{remainingPoints}</span></span>
         </div>

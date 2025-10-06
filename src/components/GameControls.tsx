@@ -5,8 +5,8 @@ import { useGame } from '@/contexts/GameContext'
 import GameHistoryModal from './GameHistoryModal'
 
 export default function GameControls() {
-  const { state, resetGame, restartGame, updateTargetScore, clearHistory } = useGame()
-  const { gameStarted, gameEnded, targetScore } = state
+  const { state, resetGame, restartGame, updateTargetScore, clearHistory, loadFromFile, exportData, changeFileLocation, storageError } = useGame()
+  const { gameStarted, targetScore } = state
   const [showRestartConfirm, setShowRestartConfirm] = useState(false)
   const [showResetConfirm, setShowResetConfirm] = useState(false)
   const [showTargetScoreModal, setShowTargetScoreModal] = useState(false)
@@ -89,6 +89,24 @@ export default function GameControls() {
         🎮 Game Controls
       </h3>
 
+      {/* Setup Auto-Save Prompt - shown when no file is configured */}
+      {storageError && storageError.includes('Change Auto-Save Location') && (
+        <div className="mb-6 p-4 bg-gradient-to-r from-cyan-50 to-blue-50 border-2 border-cyan-400 rounded-xl">
+          <p className="text-center text-sm font-semibold text-gray-700 mb-3">
+            💾 Enable Auto-Save to File
+          </p>
+          <button
+            onClick={changeFileLocation}
+            className="w-full py-4 px-6 bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-xl hover:from-cyan-700 hover:to-blue-700 focus:outline-none focus:ring-4 focus:ring-cyan-500 focus:ring-offset-2 font-bold text-lg transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-1"
+          >
+            📍 Setup Auto-Save Now
+          </button>
+          <p className="text-center text-xs text-gray-600 mt-2">
+            Click to choose where to save your game file
+          </p>
+        </div>
+      )}
+
       <div className="space-y-4">
         {/* Game History Button */}
         <button
@@ -106,12 +124,41 @@ export default function GameControls() {
           📊 Update Target Score
         </button>
 
+        {/* File Management Section */}
+        <div className="border-t-2 border-gray-300 pt-4 space-y-4">
+          <p className="text-center text-sm font-semibold text-gray-600">📁 File Management</p>
+
+          {/* Export Data Button */}
+          <button
+            onClick={exportData}
+            className="w-full py-5 px-6 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-500 focus:ring-offset-2 font-bold text-lg transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-1"
+          >
+            💾 Export Data
+          </button>
+
+          {/* Load from File Button */}
+          <button
+            onClick={loadFromFile}
+            className="w-full py-5 px-6 bg-teal-600 text-white rounded-xl hover:bg-teal-700 focus:outline-none focus:ring-4 focus:ring-teal-500 focus:ring-offset-2 font-bold text-lg transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-1"
+          >
+            📂 Load from File
+          </button>
+
+          {/* Change File Location Button */}
+          <button
+            onClick={changeFileLocation}
+            className="w-full py-5 px-6 bg-cyan-600 text-white rounded-xl hover:bg-cyan-700 focus:outline-none focus:ring-4 focus:ring-cyan-500 focus:ring-offset-2 font-bold text-lg transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-1"
+          >
+            📍 Change Auto-Save Location
+          </button>
+        </div>
+
         {/* Cleanup Storage Button */}
         <button
           onClick={handleCleanupClick}
           className="w-full py-5 px-6 bg-purple-600 text-white rounded-xl hover:bg-purple-700 focus:outline-none focus:ring-4 focus:ring-purple-500 focus:ring-offset-2 font-bold text-lg transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-1"
         >
-          🧹 Cleanup Storage
+          🧹 Cleanup History
         </button>
 
         {/* Restart Game Button - Always visible when game is started */}
@@ -135,7 +182,10 @@ export default function GameControls() {
         <p className="font-semibold">💡 Quick Tips:</p>
         <p>• View game history and travel back in time</p>
         <p>• Update target score during the game</p>
-        <p>• Cleanup storage if you get quota errors</p>
+        <p>• Export data to save a backup copy</p>
+        <p>• Load from file to restore previous games</p>
+        <p>• Game auto-saves to file on every change</p>
+        <p>• Cleanup history to remove old entries</p>
         <p>• Restart keeps the same players and target score</p>
         <p>• Reset clears all scores and returns to setup</p>
       </div>
@@ -241,13 +291,13 @@ export default function GameControls() {
         </div>
       )}
 
-      {/* Cleanup Storage Confirmation Modal */}
+      {/* Cleanup History Confirmation Modal */}
       {showCleanupConfirm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-8 max-w-lg mx-4">
-            <h3 className="text-2xl font-bold text-gray-800 mb-6 text-center">🧹 Cleanup Storage</h3>
+            <h3 className="text-2xl font-bold text-gray-800 mb-6 text-center">🧹 Cleanup History</h3>
             <p className="text-lg text-gray-600 mb-8 text-center">
-              This will clear the game history to free up storage space. Your current game progress will be saved, but you won't be able to travel back in time through old history entries.
+              This will clear the game history. Your current game progress will be saved, but you won&apos;t be able to travel back in time through old history entries.
             </p>
             <div className="flex space-x-4">
               <button

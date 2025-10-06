@@ -10,12 +10,21 @@ export type Turn = {
   isExcessTurn: boolean // Whether this turn exceeded the target
 }
 
+export type Team = {
+  id: string
+  name: string
+  players: string[] // Array of player IDs
+  score: number
+  color: string // For UI display
+}
+
 export type Player = {
   id: string
   name: string
   score: number
   turns: Turn[]
   currentTurnScores: number[]
+  teamId?: string // Optional team assignment
 }
 
 export type GameHistoryEntry = {
@@ -29,16 +38,19 @@ export type GameHistoryEntry = {
 
 export type GameState = {
   players: Player[]
+  teams: Team[]
   targetScore: number
   currentPlayerIndex: number
   gameStarted: boolean
   gameEnded: boolean
   winner: Player | null
+  winningTeam: Team | null
   history: GameHistoryEntry[]
+  gameMode: 'individual' | 'team' // New field to track game mode
 }
 
 type GameAction =
-  | { type: 'START_GAME'; payload: { players: string[]; targetScore: number } }
+  | { type: 'START_GAME'; payload: { players: string[]; targetScore: number; gameMode: 'individual' | 'team'; teams?: Team[] } }
   | { type: 'ADD_SCORE'; payload: { playerId: string; score: number } }
   | { type: 'COMPLETE_TURN'; payload: { playerId: string } }
   | { type: 'NEXT_TURN' }
@@ -52,12 +64,15 @@ type GameAction =
 
 const initialState: GameState = {
   players: [],
+  teams: [],
   targetScore: 0,
   currentPlayerIndex: 0,
   gameStarted: false,
   gameEnded: false,
   winner: null,
+  winningTeam: null,
   history: [],
+  gameMode: 'individual',
 }
 
 // Helper function to create history entries
@@ -70,20 +85,31 @@ const createHistoryEntry = (action: string, description: string, gameState: Game
   turnNumber,
 })
 
-// Helper function to add history entry with automatic cleanup
+// Helper function to calculate team scores
+const calculateTeamScores = (players: Player[], teams: Team[]): Team[] => {
+  return teams.map(team => {
+    const teamPlayers = players.filter(player => player.teamId === team.id)
+    const teamScore = teamPlayers.reduce((sum, player) => sum + player.score, 0)
+    return {
+      ...team,
+      score: teamScore,
+    }
+  })
+}
+
+// Helper function to check for team winner
+const checkTeamWinner = (teams: Team[], targetScore: number): Team | null => {
+  return teams.find(team => team.score === targetScore) || null
+}
+
+// Helper function to add history entry
 const addToHistory = (state: GameState, action: string, description: string, turnNumber: number): GameState => {
   const historyEntry = createHistoryEntry(action, description, state, turnNumber)
   const newHistory = [...(state.history || []), historyEntry]
 
-  // Keep only the last 50 history entries to prevent storage bloat
-  const maxHistoryEntries = 50
-  const cleanedHistory = newHistory.length > maxHistoryEntries
-    ? newHistory.slice(-maxHistoryEntries)
-    : newHistory
-
   return {
     ...state,
-    history: cleanedHistory,
+    history: newHistory,
   }
 }
 
@@ -96,20 +122,33 @@ function gameReducer(state: GameState, action: GameAction): GameState {
         score: 0,
         turns: [],
         currentTurnScores: [],
+        teamId: action.payload.gameMode === 'team' && action.payload.teams
+          ? action.payload.teams.find(team => team.players.includes(`player-${index}`))?.id
+          : undefined,
       }))
+
+      const teams = action.payload.gameMode === 'team' && action.payload.teams
+        ? calculateTeamScores(players, action.payload.teams)
+        : []
 
       const newState = {
         ...state,
         players,
+        teams,
         targetScore: action.payload.targetScore,
         currentPlayerIndex: 0,
         gameStarted: true,
         gameEnded: false,
         winner: null,
+        winningTeam: null,
         history: [],
+        gameMode: action.payload.gameMode,
       }
 
-      return addToHistory(newState, 'START_GAME', `Game started with ${players.length} players, target score: ${action.payload.targetScore}`, 0)
+      const gameModeText = action.payload.gameMode === 'team' ? 'team mode' : 'individual mode'
+      const teamInfo = action.payload.gameMode === 'team' ? ` with ${teams.length} teams` : ''
+
+      return addToHistory(newState, 'START_GAME', `Game started in ${gameModeText} with ${players.length} players${teamInfo}, target score: ${action.payload.targetScore}`, 0)
     }
 
     case 'ADD_SCORE': {
@@ -164,16 +203,30 @@ function gameReducer(state: GameState, action: GameAction): GameState {
         return player
       })
 
+      // Update team scores
+      const updatedTeams = state.gameMode === 'team'
+        ? calculateTeamScores(updatedPlayers, state.teams)
+        : []
+
       // Check for winner (exact target score only)
-      const winner = updatedPlayers.find(player => player.score === state.targetScore)
+      const winner = state.gameMode === 'individual'
+        ? updatedPlayers.find(player => player.score === state.targetScore)
+        : null
+
+      const winningTeam = state.gameMode === 'team'
+        ? checkTeamWinner(updatedTeams, state.targetScore)
+        : null
+
       const player = updatedPlayers.find(p => p.id === action.payload.playerId)
       const turnNumber = player?.turns.length || 0
 
       const newState = {
         ...state,
         players: updatedPlayers,
-        gameEnded: !!winner,
+        teams: updatedTeams,
+        gameEnded: !!(winner || winningTeam),
         winner: winner || null,
+        winningTeam: winningTeam || null,
       }
 
       const description = player?.turns[player.turns.length - 1]?.isExcessTurn
@@ -200,12 +253,18 @@ function gameReducer(state: GameState, action: GameAction): GameState {
         currentTurnScores: [],
       }))
 
+      const resetTeams = state.gameMode === 'team'
+        ? calculateTeamScores(resetPlayers, state.teams)
+        : []
+
       return {
         ...state,
         players: resetPlayers,
+        teams: resetTeams,
         currentPlayerIndex: 0,
         gameEnded: false,
         winner: null,
+        winningTeam: null,
       }
     }
 
@@ -218,6 +277,9 @@ function gameReducer(state: GameState, action: GameAction): GameState {
       const loadedState = {
         ...action.payload,
         history: action.payload.history || [],
+        teams: action.payload.teams || [],
+        gameMode: action.payload.gameMode || 'individual',
+        winningTeam: action.payload.winningTeam || null,
         players: action.payload.players.map(player => ({
           ...player,
           turns: player.turns.map(turn => ({
@@ -231,14 +293,21 @@ function gameReducer(state: GameState, action: GameAction): GameState {
     }
 
     case 'UPDATE_TARGET_SCORE': {
-      // Check if any player has already reached the new target score (exact match)
-      const winner = state.players.find(player => player.score === action.payload.targetScore)
+      // Check if any player or team has already reached the new target score (exact match)
+      const winner = state.gameMode === 'individual'
+        ? state.players.find(player => player.score === action.payload.targetScore)
+        : null
+
+      const winningTeam = state.gameMode === 'team'
+        ? checkTeamWinner(state.teams, action.payload.targetScore)
+        : null
 
       return {
         ...state,
         targetScore: action.payload.targetScore,
-        gameEnded: !!winner,
+        gameEnded: !!(winner || winningTeam),
         winner: winner || null,
+        winningTeam: winningTeam || null,
       }
     }
 
@@ -288,13 +357,25 @@ function gameReducer(state: GameState, action: GameAction): GameState {
       })
 
       // Check for winner after score update (exact target score only)
-      const winner = updatedPlayers.find(player => player.score === state.targetScore)
+      const winner = state.gameMode === 'individual'
+        ? updatedPlayers.find(player => player.score === state.targetScore)
+        : null
+
+      const updatedTeams = state.gameMode === 'team'
+        ? calculateTeamScores(updatedPlayers, state.teams)
+        : []
+
+      const winningTeam = state.gameMode === 'team'
+        ? checkTeamWinner(updatedTeams, state.targetScore)
+        : null
 
       return {
         ...state,
         players: updatedPlayers,
-        gameEnded: !!winner,
+        teams: updatedTeams,
+        gameEnded: !!(winner || winningTeam),
         winner: winner || null,
+        winningTeam: winningTeam || null,
       }
     }
 
@@ -320,7 +401,7 @@ function gameReducer(state: GameState, action: GameAction): GameState {
 
 type GameContextType = {
   state: GameState
-  startGame: (players: string[], targetScore: number) => void
+  startGame: (players: string[], targetScore: number, gameMode: 'individual' | 'team', teams?: Team[]) => void
   addScore: (playerId: string, score: number) => void
   completeTurn: (playerId: string) => void
   nextTurn: () => void
@@ -332,54 +413,261 @@ type GameContextType = {
   clearHistory: () => void
   storageError: string | null
   clearStorageError: () => void
+  loadFromFile: () => Promise<void>
+  exportData: () => void
+  changeFileLocation: () => Promise<void>
 }
 
 const GameContext = createContext<GameContextType | undefined>(undefined)
 
-// Helper function to compress game state for localStorage
-const compressGameState = (state: GameState): string => {
-  // Create a minimal version of the state for storage
-  const compressedState = {
-    players: state.players.map(player => ({
-      id: player.id,
-      name: player.name,
-      score: player.score,
-      // Only keep essential turn data - remove detailed scores, keep only totals
-      turns: player.turns.map(turn => ({
-        total: turn.total,
-        turnNumber: turn.turnNumber,
-        isExcessTurn: turn.isExcessTurn
-        // Remove scores array and excessScore to save space
-      })),
-      currentTurnScores: player.currentTurnScores
-    })),
-    targetScore: state.targetScore,
-    currentPlayerIndex: state.currentPlayerIndex,
-    gameStarted: state.gameStarted,
-    gameEnded: state.gameEnded,
-    winner: state.winner ? {
-      id: state.winner.id,
-      name: state.winner.name
-      // Remove score to save space
-    } : null,
-    // Limit history to last 10 entries for storage to prevent quota issues
-    history: (state.history || []).slice(-10).map(entry => ({
-      id: entry.id,
-      timestamp: entry.timestamp,
-      action: entry.action,
-      description: entry.description,
-      turnNumber: entry.turnNumber
-      // Remove full gameState to save space
-    }))
-  }
+// File System Access API for saving to text file
+let fileHandle: FileSystemFileHandle | null = null
 
-  return JSON.stringify(compressedState)
+// Helper function to request file access
+const requestFileAccess = async (): Promise<FileSystemFileHandle | null> => {
+  try {
+    // Check if File System Access API is supported
+    if (!('showSaveFilePicker' in window)) {
+      console.warn('File System Access API not supported in this browser')
+      return null
+    }
+
+    const handle = await (window as any).showSaveFilePicker({
+      suggestedName: 'game-score-tracker-data.json',
+      types: [
+        {
+          description: 'Game Data File',
+          accept: {
+            'application/json': ['.json'],
+          },
+        },
+      ],
+    })
+
+    fileHandle = handle
+    console.log('File access granted')
+    return handle
+  } catch (error) {
+    if ((error as Error).name !== 'AbortError') {
+      console.error('Failed to request file access:', error)
+    }
+    return null
+  }
 }
 
-// Helper function to check localStorage size and clean if needed
+// Helper function to save to file (requires fileHandle to be set first)
+const saveToFile = async (data: GameState): Promise<boolean> => {
+  try {
+    if (!fileHandle) {
+      console.warn('No file handle available. Use "Change Auto-Save Location" to set one up.')
+      return false
+    }
+
+    // Check if we still have permission
+    const permission = await (fileHandle as any).queryPermission({ mode: 'readwrite' })
+    if (permission !== 'granted') {
+      const requestPermission = await (fileHandle as any).requestPermission({ mode: 'readwrite' })
+      if (requestPermission !== 'granted') {
+        console.warn('File permission denied')
+        fileHandle = null
+        return false
+      }
+    }
+
+    // Write to file
+    const writable = await fileHandle.createWritable()
+    const jsonData = JSON.stringify(data, null, 2)
+    await writable.write(jsonData)
+    await writable.close()
+
+    console.log('Game saved to file successfully')
+    return true
+  } catch (error) {
+    console.error('Failed to save to file:', error)
+    fileHandle = null
+    return false
+  }
+}
+
+// Helper function to load from file
+const loadFromFile = async (): Promise<GameState | null> => {
+  try {
+    // Check if File System Access API is supported
+    if (!('showOpenFilePicker' in window)) {
+      console.warn('File System Access API not supported in this browser')
+      return null
+    }
+
+    const [handle] = await (window as any).showOpenFilePicker({
+      types: [
+        {
+          description: 'Game Data File',
+          accept: {
+            'application/json': ['.json'],
+          },
+        },
+      ],
+      multiple: false,
+    })
+
+    fileHandle = handle
+
+    const file = await handle.getFile()
+    const text = await file.text()
+    const gameState = JSON.parse(text) as GameState
+
+    console.log('Game loaded from file successfully')
+    return gameState
+  } catch (error) {
+    if ((error as Error).name !== 'AbortError') {
+      console.error('Failed to load from file:', error)
+    }
+    return null
+  }
+}
+
+// Helper function to export game data (download)
+const exportGameData = (data: GameState): void => {
+  const jsonData = JSON.stringify(data, null, 2)
+  const blob = new Blob([jsonData], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `game-score-tracker-${new Date().toISOString().split('T')[0]}.json`
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+  console.log('Game data exported successfully')
+}
+
+// Helper function to save full game state for localStorage
+const compressGameState = (state: GameState): string => {
+  // Save complete state without any compression or limits
+  return JSON.stringify(state)
+}
+
+// Helper function to split data into chunks
+const splitIntoChunks = (data: string, chunkSize: number = 50000): string[] => {
+  const chunks: string[] = []
+  for (let i = 0; i < data.length; i += chunkSize) {
+    chunks.push(data.slice(i, i + chunkSize))
+  }
+  return chunks
+}
+
+// Helper function to save data in chunks
+const saveChunkedData = (baseKey: string, data: string): boolean => {
+  try {
+    // First, clean up any existing chunks for this key
+    cleanupChunks(baseKey)
+
+    // Split data into chunks
+    const chunks = splitIntoChunks(data)
+
+    // If data is small enough, save as single chunk
+    if (chunks.length === 1) {
+      localStorage.setItem(baseKey, data)
+      return true
+    }
+
+    // Save metadata about the chunks
+    const metadata = {
+      totalChunks: chunks.length,
+      timestamp: Date.now(),
+      dataSize: data.length,
+      version: '2.0' // Version for compatibility
+    }
+
+    // Save metadata
+    localStorage.setItem(`${baseKey}-meta`, JSON.stringify(metadata))
+
+    // Save each chunk
+    for (let i = 0; i < chunks.length; i++) {
+      const chunkKey = `${baseKey}-chunk-${i}`
+      localStorage.setItem(chunkKey, chunks[i])
+    }
+
+    return true
+  } catch (error) {
+    console.error('Failed to save chunked data:', error)
+    return false
+  }
+}
+
+// Helper function to load data from chunks
+const loadChunkedData = (baseKey: string): string | null => {
+  try {
+    // First try to load as single item (for small data)
+    const singleData = localStorage.getItem(baseKey)
+    if (singleData) {
+      return singleData
+    }
+
+    // Load metadata
+    const metadataStr = localStorage.getItem(`${baseKey}-meta`)
+    if (!metadataStr) {
+      return null
+    }
+
+    const metadata = JSON.parse(metadataStr)
+    const { totalChunks } = metadata
+
+    // Load all chunks
+    const chunks: string[] = []
+    for (let i = 0; i < totalChunks; i++) {
+      const chunkKey = `${baseKey}-chunk-${i}`
+      const chunk = localStorage.getItem(chunkKey)
+      if (!chunk) {
+        console.error(`Missing chunk ${i} for key ${baseKey}`)
+        return null
+      }
+      chunks.push(chunk)
+    }
+
+    // Combine chunks
+    return chunks.join('')
+  } catch (error) {
+    console.error('Failed to load chunked data:', error)
+    return null
+  }
+}
+
+// Helper function to cleanup old chunks
+const cleanupChunks = (baseKey: string): void => {
+  try {
+    // Remove metadata
+    localStorage.removeItem(`${baseKey}-meta`)
+
+    // Remove all chunks (we don't know how many there might be, so we'll try up to 100)
+    for (let i = 0; i < 100; i++) {
+      const chunkKey = `${baseKey}-chunk-${i}`
+      if (localStorage.getItem(chunkKey)) {
+        localStorage.removeItem(chunkKey)
+      } else {
+        // If we hit a missing chunk, we've probably cleaned them all
+        break
+      }
+    }
+
+    // Also clean up old format chunks for backward compatibility
+    for (let i = 0; i < 100; i++) {
+      const oldChunkKey = `${baseKey}-${i}`
+      if (localStorage.getItem(oldChunkKey)) {
+        localStorage.removeItem(oldChunkKey)
+      } else {
+        break
+      }
+    }
+  } catch (error) {
+    console.error('Failed to cleanup chunks:', error)
+  }
+}
+
+// Helper function to check localStorage size (no limits applied)
 const checkAndCleanStorage = (): boolean => {
   try {
-    // Estimate localStorage usage
+    // Log localStorage usage for monitoring only, no cleanup
     let totalSize = 0
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i)
@@ -391,24 +679,8 @@ const checkAndCleanStorage = (): boolean => {
       }
     }
 
-    // If we're using more than 4MB (conservative estimate), clean up
-    const maxSize = 4 * 1024 * 1024 // 4MB
-    if (totalSize > maxSize) {
-      console.warn(`LocalStorage size (${Math.round(totalSize / 1024)}KB) approaching limit. Cleaning up...`)
-
-      // Clear all game-related data
-      const keysToRemove = []
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i)
-        if (key && (key.startsWith('game-score-tracker') || key.includes('game'))) {
-          keysToRemove.push(key)
-        }
-      }
-
-      keysToRemove.forEach(key => localStorage.removeItem(key))
-      return true
-    }
-
+    // Just log the size, don't enforce any limits
+    console.log(`LocalStorage size: ${Math.round(totalSize / 1024)}KB`)
     return false
   } catch (error) {
     console.warn('Error checking localStorage size:', error)
@@ -416,48 +688,31 @@ const checkAndCleanStorage = (): boolean => {
   }
 }
 
-// Helper function to safely save to localStorage with error handling
+// Helper function to perform periodic cleanup (disabled for unlimited storage)
+const performPeriodicCleanup = (): void => {
+  // No cleanup performed - unlimited storage enabled
+}
+
+// Helper function to safely save to localStorage with error handling using chunked storage
 const saveToLocalStorage = (key: string, data: string): boolean => {
-  // Check storage size before attempting to save
+  // Log storage size for monitoring
   checkAndCleanStorage()
 
+  // Try chunked storage first (handles large data automatically)
+  const chunkedSuccess = saveChunkedData(key, data)
+  if (chunkedSuccess) {
+    return true
+  }
+
+  // Fallback to regular storage if chunked fails
   try {
     localStorage.setItem(key, data)
     return true
   } catch (error) {
     if (error instanceof Error && error.name === 'QuotaExceededError') {
-      console.warn('LocalStorage quota exceeded. Attempting aggressive cleanup...')
-
-      try {
-        // Step 1: Clear all game-related localStorage items
-        const keysToRemove = []
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i)
-          if (key && (key.startsWith('game-score-tracker') || key.includes('game'))) {
-            keysToRemove.push(key)
-          }
-        }
-
-        keysToRemove.forEach(key => localStorage.removeItem(key))
-
-        // Step 2: Try saving again
-        localStorage.setItem(key, data)
-        return true
-      } catch (retryError) {
-        console.warn('First cleanup failed. Attempting more aggressive cleanup...')
-
-        try {
-          // Step 3: Clear ALL localStorage if still failing
-          localStorage.clear()
-
-          // Step 4: Try saving one more time
-          localStorage.setItem(key, data)
-          return true
-        } catch (finalError) {
-          console.error('All cleanup attempts failed. Game state cannot be saved:', finalError)
-          return false
-        }
-      }
+      console.error('LocalStorage quota exceeded. Unable to save game state.')
+      console.log('Consider: 1) Using a different browser with larger quota, 2) Clearing old browser data, or 3) Exporting your game data manually.')
+      return false
     } else {
       console.error('Failed to save game state:', error)
       return false
@@ -468,41 +723,68 @@ const saveToLocalStorage = (key: string, data: string): boolean => {
 export function GameProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(gameReducer, initialState)
   const [storageError, setStorageError] = useState<string | null>(null)
+  const [isFirstSave, setIsFirstSave] = useState(true)
 
   const clearStorageError = () => setStorageError(null)
 
-  // Load game from localStorage on mount
+  // Load game on mount - try localStorage first, or allow user to load from file
   useEffect(() => {
-    const savedGame = localStorage.getItem('game-score-tracker')
-    if (savedGame) {
+    const loadGame = async () => {
       try {
-        const gameState = JSON.parse(savedGame)
-        dispatch({ type: 'LOAD_GAME', payload: gameState })
+        // Try to load from localStorage first (for backward compatibility)
+        let savedGame = loadChunkedData('game-score-tracker')
+        if (!savedGame) {
+          savedGame = localStorage.getItem('game-score-tracker')
+        }
+
+        if (savedGame) {
+          try {
+            const parsedState = JSON.parse(savedGame)
+            dispatch({ type: 'LOAD_GAME', payload: parsedState })
+            console.log('Game loaded from localStorage')
+
+            // Clean up localStorage after loading since we'll use file storage going forward
+            cleanupChunks('game-score-tracker')
+            localStorage.removeItem('game-score-tracker')
+          } catch (error) {
+            console.error('Failed to load saved game:', error)
+            cleanupChunks('game-score-tracker')
+            localStorage.removeItem('game-score-tracker')
+          }
+        }
       } catch (error) {
-        console.error('Failed to load saved game:', error)
-        // Clear corrupted data
-        localStorage.removeItem('game-score-tracker')
+        console.error('Failed to load game:', error)
       }
     }
+
+    loadGame()
   }, [])
 
-  // Save game to localStorage whenever state changes
+  // Save game to file whenever state changes (only if file handle exists)
   useEffect(() => {
-    if (state.gameStarted) {
-      const compressedData = compressGameState(state)
-      const success = saveToLocalStorage('game-score-tracker', compressedData)
+    if (state.gameStarted && fileHandle) {
+      const saveGame = async () => {
+        const success = await saveToFile(state)
 
-      if (!success) {
-        console.warn('Game state could not be saved to localStorage. Game will continue but progress may be lost on page refresh.')
-        setStorageError('Unable to save game progress. Your game will continue but may be lost on page refresh.')
-      } else {
-        setStorageError(null) // Clear any previous errors
+        if (!success) {
+          // Silent fallback - don't show error on every save
+          console.warn('File save failed, game data may not be persisted')
+          setStorageError('Auto-save failed. Click "Change Auto-Save Location" to set up file saving.')
+        } else {
+          setStorageError(null)
+        }
       }
-    }
-  }, [state])
 
-  const startGame = (players: string[], targetScore: number) => {
-    dispatch({ type: 'START_GAME', payload: { players, targetScore } })
+      saveGame()
+    } else if (state.gameStarted && !fileHandle && isFirstSave) {
+      // Show notification to set up auto-save
+      setIsFirstSave(false)
+      setStorageError('Click "Change Auto-Save Location" in Game Controls to enable auto-save to file.')
+    }
+  }, [state, isFirstSave])
+
+  const startGame = (players: string[], targetScore: number, gameMode: 'individual' | 'team', teams?: Team[]) => {
+    dispatch({ type: 'START_GAME', payload: { players, targetScore, gameMode, teams } })
   }
 
   const addScore = (playerId: string, score: number) => {
@@ -523,6 +805,11 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
   const resetGame = () => {
     dispatch({ type: 'RESET_GAME' })
+    // Clear file handle
+    fileHandle = null
+    setIsFirstSave(true)
+    // Clean up any remaining localStorage
+    cleanupChunks('game-score-tracker')
     localStorage.removeItem('game-score-tracker')
   }
 
@@ -542,8 +829,61 @@ export function GameProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'CLEAR_HISTORY' })
   }
 
+  // Load game data from a file
+  const loadFromFileHandler = async () => {
+    const gameState = await loadFromFile()
+    if (gameState) {
+      dispatch({ type: 'LOAD_GAME', payload: gameState })
+      setIsFirstSave(false) // File handle is set, so subsequent saves will work
+    }
+  }
+
+  // Export game data as download
+  const exportData = () => {
+    exportGameData(state)
+  }
+
+  // Change the file location for auto-save (requires user click)
+  const changeFileLocation = async () => {
+    try {
+      // Request new file location (this requires user gesture)
+      const newHandle = await requestFileAccess()
+      if (newHandle) {
+        fileHandle = newHandle
+        setIsFirstSave(false)
+
+        // Save current state to the new file
+        const success = await saveToFile(state)
+        if (success) {
+          setStorageError(null)
+        } else {
+          setStorageError('Failed to save to the selected file.')
+        }
+      }
+    } catch (error) {
+      console.error('Failed to change file location:', error)
+    }
+  }
+
   return (
-    <GameContext.Provider value={{ state, startGame, addScore, completeTurn, nextTurn, restartGame, resetGame, updateTargetScore, editTurnScore, travelToHistory, clearHistory, storageError, clearStorageError }}>
+    <GameContext.Provider value={{
+      state,
+      startGame,
+      addScore,
+      completeTurn,
+      nextTurn,
+      restartGame,
+      resetGame,
+      updateTargetScore,
+      editTurnScore,
+      travelToHistory,
+      clearHistory,
+      storageError,
+      clearStorageError,
+      loadFromFile: loadFromFileHandler,
+      exportData,
+      changeFileLocation
+    }}>
       {children}
     </GameContext.Provider>
   )

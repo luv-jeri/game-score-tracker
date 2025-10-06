@@ -15,11 +15,11 @@ export default function StorageNotification({ show, message, type, onClose }: St
   useEffect(() => {
     if (show) {
       setIsVisible(true)
-      // Auto-hide after 5 seconds
+      // Auto-hide after 10 seconds (longer for important messages)
       const timer = setTimeout(() => {
         setIsVisible(false)
         setTimeout(onClose, 300) // Wait for animation to complete
-      }, 5000)
+      }, 10000)
 
       return () => clearTimeout(timer)
     } else {

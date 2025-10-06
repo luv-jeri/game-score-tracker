@@ -109,7 +109,7 @@ export default function GameHistoryModal({ isOpen, onClose }: GameHistoryModalPr
             </div>
           ) : (
             <div className="space-y-4">
-              {(history || []).map((entry, index) => (
+              {(history || []).map((entry) => (
                 <div
                   key={entry.id}
                   onClick={() => handleTimeTravel(entry)}
